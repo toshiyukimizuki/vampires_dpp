@@ -24,12 +24,43 @@ logger = configurelogging_utils()
 
 __all__ = "centroid"
 
+MBI_MANUAL_CENTROIDS = {
+    1: {
+        "F610": [(242, 279), (274, 251), (302, 284), (270, 311)],
+        "F670": [(305, 842), (275, 808), (240, 837), (270, 873)],
+        "F720": [(873, 845), (804, 839), (836, 877), (841, 807)],
+        "F760": [(1998, 849), (1925, 843), (1964, 810), (1959, 883)],
+    },
+    2: {
+        "F610": [(303, 822), (243, 827), (274, 855), (271, 794)],
+        "F670": [(306, 260), (241, 265), (275, 295), (271, 229)],
+        "F720": [(804, 265), (841, 297), (874, 259), (837, 227)],
+        "F760": [(1997, 258), (1924, 263), (1963, 297), (1958, 224)],
+    },
+}
+
 
 def get_psf_centroids_manual(
     cams: Sequence[int], fields: Sequence[str], npsfs: int
 ) -> dict[str, NDArray]:
     centroids = {f"cam{cam:.0f}": np.empty((len(fields), npsfs, 2), dtype="f4") for cam in cams}
     for cam_key, cent_arr in centroids.items():
+        if npsfs == 4 and len(fields) > 1 and "F610" in fields:
+            defaults = MBI_MANUAL_CENTROIDS[int(cam_key[-1])]
+            reference = np.asarray(defaults["F610"], dtype="f4")
+            entered = np.empty_like(reference)
+            click.echo(f"Enter F610 satellite spot centroids for {cam_key} (x, y):")
+            for spot_idx, point in enumerate(reference):
+                response = click.prompt(
+                    f" - F610 PSF: {spot_idx} (x, y)",
+                    default=f"{point[0]:.0f}, {point[1]:.0f}",
+                )
+                entered[spot_idx] = [float(value) for value in response.split(",")]
+            offset = np.mean(entered - reference, axis=0)
+            for field_idx, field in enumerate(fields):
+                cent_arr[field_idx] = np.asarray(defaults[field], dtype="f4") + offset
+            cent_arr[fields.index("F610")] = entered
+            continue
         click.echo(f"Enter comma-separated x, y centroids for {click.style(cam_key, bold=True)}:")
         for i, field in enumerate(fields):
             for j in range(npsfs):

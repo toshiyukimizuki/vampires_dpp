@@ -46,22 +46,25 @@ def get_psf_centroids_manual(
     centroids = {f"cam{cam:.0f}": np.empty((len(fields), npsfs, 2), dtype="f4") for cam in cams}
     for cam_key, cent_arr in centroids.items():
         if npsfs == 4 and len(fields) > 1 and "F610" in fields:
-            defaults = MBI_MANUAL_CENTROIDS[int(cam_key[-1])]
-            reference = np.asarray(defaults["F610"], dtype="f4")
+            cam_num = int(cam_key[-1])
+            reference_field = "F610" if cam_num == 1 else "F670"
+            defaults = MBI_MANUAL_CENTROIDS[cam_num]
+            reference = np.asarray(defaults[reference_field], dtype="f4")
             entered = np.empty_like(reference)
-            click.echo(f"Enter F610 satellite spot centroids for {cam_key} (x, y):")
+            click.echo(f"For {cam_key}, use the upper-left {reference_field} image.")
+            click.echo("Enter full-image (x, y) positions of its top, left, bottom, and right spots:")
             for spot_idx, (spot_name, point) in enumerate(
                 zip(("top", "left", "bottom", "right"), reference, strict=True)
             ):
                 response = click.prompt(
-                    f" - F610 {spot_name} spot (x, y)",
+                    f" - {reference_field} {spot_name} spot (x, y)",
                     default=f"{point[0]:.0f}, {point[1]:.0f}",
                 )
                 entered[spot_idx] = [float(value) for value in response.split(",")]
             offset = np.mean(entered - reference, axis=0)
             for field_idx, field in enumerate(fields):
                 cent_arr[field_idx] = np.asarray(defaults[field], dtype="f4") + offset
-            cent_arr[fields.index("F610")] = entered
+            cent_arr[fields.index(reference_field)] = entered
             continue
         click.echo(f"Enter comma-separated x, y centroids for {click.style(cam_key, bold=True)}:")
         for i, field in enumerate(fields):

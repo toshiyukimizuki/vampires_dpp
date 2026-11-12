@@ -47,7 +47,7 @@ def get_psf_centroids_manual(
     for cam_key, cent_arr in centroids.items():
         if npsfs == 4 and len(fields) > 1 and "F610" in fields:
             cam_num = int(cam_key[-1])
-            reference_field = "F610" if cam_num == 1 else "F670"
+            reference_field = "F670" if cam_num == 1 else "F610"
             defaults = MBI_MANUAL_CENTROIDS[cam_num]
             reference = np.asarray(defaults[reference_field], dtype="f4")
             entered = np.empty_like(reference)

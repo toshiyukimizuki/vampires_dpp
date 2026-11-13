@@ -476,6 +476,10 @@ class PipelineConfig(BaseModel):
         default=False,
         description="If true, save ADI cubes and derotation angles in the product directory.",
     )
+    adi_pair_tolerance_sec: Annotated[IsFinite[float], Interval(ge=0)] = Field(
+        default=0.2,
+        description="Maximum camera timestamp difference in seconds for ADI pairing after exact matches.",
+    )
     target: TargetConfig | None = Field(
         default=None,
         description="If set, provides target object options (primarily coordinates). If not set, header values are used.",

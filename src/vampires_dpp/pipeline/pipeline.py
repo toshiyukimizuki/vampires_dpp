@@ -94,6 +94,34 @@ def _resolve_num_proc(num_proc: int | None) -> int:
     return min(DEFAULT_NUM_PROC, cpus)
 
 
+def _pair_adi_frames(table: pd.DataFrame, tolerance_sec: float) -> list[pd.DataFrame]:
+    """Pair camera frames by exact MJD, then by the nearest MJD within tolerance."""
+    pairs = []
+    matched = set()
+    for _, group in table.groupby(["MJD", "U_FLC"], sort=False):
+        if len(group) == 2 and set(group["U_CAMERA"]) == {1, 2}:
+            pairs.append(group)
+            matched.update(group.index)
+
+    remaining = table.loc[~table.index.isin(matched)]
+    cam1 = remaining.loc[remaining["U_CAMERA"] == 1].sort_values("MJD")
+    cam2 = remaining.loc[remaining["U_CAMERA"] == 2]
+    for index, row in cam1.iterrows():
+        candidates = cam2.loc[
+            ~cam2.index.isin(matched) & cam2["U_FLC"].eq(row["U_FLC"])
+        ]
+        if candidates.empty:
+            continue
+        time_offsets = (candidates["MJD"] - row["MJD"]).abs() * 86400
+        partner = time_offsets.idxmin()
+        if time_offsets.loc[partner] <= tolerance_sec:
+            pairs.append(table.loc[[index, partner]])
+            matched.update((index, partner))
+
+    pairs.sort(key=lambda pair: pair["MJD"].mean())
+    return pairs
+
+
 class Pipeline:
     def __init__(self, config: PipelineConfig, workdir: Path | None = None, verbose: bool = False):
         self.master_backgrounds = {1: None, 2: None}
@@ -646,30 +674,37 @@ class Pipeline:
         if (
             not force
             and output_path.exists()
+            and angles_path.exists()
             and not any_file_newer(self.output_paths, output_path)
         ):
-            if not angles_path.exists():
-                group_keys = ["MJD", "U_FLC"]
-                mask = self.output_table["U_FLC"].isna()
-                self.output_table.loc[mask, "U_FLC"] = "NA"
-                time_groups = self.output_table.sort_values(group_keys).groupby(group_keys)
-                angs = [group["DEROTANG"].mean() for _, group in time_groups]
-                fits.writeto(angles_path, np.array(angs, dtype="f4"), overwrite=True)
             return
-        group_keys = ["MJD", "U_FLC"]
-        mask = self.output_table["U_FLC"].isna()
-        self.output_table.loc[mask, "U_FLC"] = "NA"
-        time_groups = self.output_table.sort_values(group_keys).groupby(group_keys)
+
+        table = self.output_table.sort_values("MJD").copy()
+        table["U_FLC"] = table["U_FLC"].fillna("NA")
+        if set(table["U_CAMERA"]) == {1, 2}:
+            time_groups = _pair_adi_frames(table, self.config.adi_pair_tolerance_sec)
+            logger.info(
+                f"Paired {len(time_groups)} ADI camera frames; excluded "
+                f"{len(table) - 2 * len(time_groups)} unmatched camera images"
+            )
+        else:
+            time_groups = [
+                group for _, group in table.groupby(["MJD", "U_FLC"], sort=True)
+            ]
+        if not time_groups:
+            raise ValueError("No ADI frames remain after camera pairing")
+
         cubes = []
         headers = []
         logger.info("Stacking output files into ADI cubes")
-        time_groups = list(time_groups)
-        for _key, group in tqdm(time_groups, desc="Stacking ADI frames", leave=False):
+        for group in tqdm(time_groups, desc="Stacking ADI frames", leave=False):
             hduls = [fits.open(path) for path in group["path"]]
             cube = np.mean([hdul[0].data for hdul in hduls], axis=0)
             cubes.append(cube)
             header = combine_frames_headers([hdul[0].header for hdul in hduls])
             headers.append(header)
+            for hdul in hduls:
+                hdul.close()
         angs = np.array([hdr["DEROTANG"] for hdr in headers])
         # stacked_hdul = combine_hduls(hduls)
         prim_hdr = combine_frames_headers(headers)
